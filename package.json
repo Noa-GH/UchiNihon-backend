@@ -1,0 +1,34 @@
+{
+  "name": "uchinihon-backend",
+  "version": "1.0.0",
+  "description": "RESTFUL API backend project for UchiNihon housing platform",
+  "main": "index.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Noa-GH/UchiNihon-backend.git"
+  },
+  "keywords": [],
+  "author": "Noah Ford",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Noa-GH/UchiNihon-backend/issues"
+  },
+  "homepage": "https://github.com/Noa-GH/UchiNihon-backend#readme",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.2",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.24.0",
+    "validator": "^13.15.35"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
