@@ -1,4 +1,5 @@
-# UchiNihon — Backend API
+````markdown
+# Akiya Finder — Backend API
 
 A standalone REST API for the Akiya Finder Japan platform.
 Built with Node.js, Express, MongoDB, and JWT authentication.
@@ -169,3 +170,6 @@ All errors follow this shape:
 | 404    | Resource not found                                     |
 | 409    | Conflict (duplicate email or duplicate saved property) |
 | 500    | Internal server error                                  |
+````
+
+---
