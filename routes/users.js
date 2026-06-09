@@ -1,9 +1,11 @@
-const router = require("Express").Router();
-const { signup, signin, getCurrentUser } = require("../controllers/users");
-const auth = require("../middlewares/auth");
+import express from "express";
+import { signup, signin, getCurrentUser } from "../controllers/users.js";
+import auth from "../middlewares/auth.js";
+
+const router = express.Router();
 
 router.post("/signup", signup);
 router.post("/signin", signin);
 router.get("/users/me", auth, getCurrentUser); // This will run first for auth
 
-modules.exports = router;
+export default router;

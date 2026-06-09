@@ -45,7 +45,7 @@ const handleError = (err, req, res, next) => {
     .json({ error: statusCode === 500 ? "Internal Server Error" : message });
 };
 
-module.exports = {
+export {
   BadRequestError,
   UnauthorizedError,
   ForbiddenError,

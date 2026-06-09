@@ -1,19 +1,19 @@
-const bcryt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const User = require("../models/User");
-const { JWT_SECRET } = require("../config");
-const {
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import User from "../models/user.model.js";
+import { JWT_SECRET } from "../utils/config.js";
+import {
   BadRequestError,
-  UnauthenticatedError,
+  UnauthorizedError,
   ConflictError,
   NotFoundError,
-} = require("../errors");
+} from "../utils/errors.js";
 
 // POST - /api/signup
 const signup = async (req, res, next) => {
   try {
     const { name, email, password } = req.body;
-    const hashedPassword = await bcryt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await User.create({ name, email, password: hashedPassword });
     res.status(201).json({ _id: user._id, name: user.name, email: user.email });
@@ -57,4 +57,4 @@ const getCurrentUser = async (req, res, next) => {
   }
 };
 
-module.exports = { signup, signin, getCurrentUser };
+export { signup, signin, getCurrentUser };

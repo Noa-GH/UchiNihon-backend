@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const propertySchema = new mongoose.Schema(
   {
@@ -27,4 +27,4 @@ const propertySchema = new mongoose.Schema(
 // catches and converts to a 409 Conflict response.
 propertySchema.index({ listingId: 1, owner: 1 }, { unique: true });
 
-module.exports = mongoose.model("Property", propertySchema);
+export default mongoose.model("Property", propertySchema);

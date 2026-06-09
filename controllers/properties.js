@@ -1,9 +1,9 @@
-const Property = require("../models/property.model");
-const {
+import Property from "../models/property.model.js";
+import {
   ConflictError,
   NotFoundError,
   ForbiddenError,
-} = require("../utils/errors");
+} from "../utils/errors.js";
 
 // GET /api/properties/saved
 const getSavedProperties = async (req, res, next) => {
@@ -77,4 +77,4 @@ const unsaveProperty = async (req, res, next) => {
   }
 };
 
-module.exports = { getSavedProperties, saveProperty, unsaveProperty };
+export { getSavedProperties, saveProperty, unsaveProperty };

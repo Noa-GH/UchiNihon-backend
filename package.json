@@ -14,7 +14,7 @@
   "keywords": [],
   "author": "Noah Ford",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/Noa-GH/UchiNihon-backend/issues"
   },
