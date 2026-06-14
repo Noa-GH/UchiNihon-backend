@@ -8,7 +8,7 @@ export const MONGO_URI =
 export const JWT_SECRET =
   process.env.JWT_SECRET || "your-secret-here || optional-fallback-here";
 
-const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:3002";
+const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:3001";
 export const CORS_ORIGIN = corsOrigin
   .split(",")
   .map((origin) => origin.trim())

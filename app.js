@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import { PORT, MONGO_URI, CORS_ORIGIN } from "./utils/config.js";
 import userRoutes from "./routes/users.js";
 import propertyRoutes from "./routes/properties.js";
+import estatRoutes from "./routes/estat.js";
 import { handleError } from "./utils/errors.js";
 
 dotenv.config();
@@ -29,6 +30,7 @@ mongoose
 
 app.use("/api", userRoutes);
 app.use("/api", propertyRoutes);
+app.use("/api", estatRoutes);
 
 // Global error handler — must be registered AFTER all routes.
 // Express identifies it as an error handler because it has exactly 4 parameters.
