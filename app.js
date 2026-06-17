@@ -6,6 +6,7 @@ import { PORT, MONGO_URI, CORS_ORIGIN } from "./utils/config.js";
 import userRoutes from "./routes/users.js";
 import propertyRoutes from "./routes/properties.js";
 import estatRoutes from "./routes/estat.js";
+import listingsRoutes from "./routes/listings.js";
 import { handleError } from "./utils/errors.js";
 
 dotenv.config();
@@ -28,6 +29,7 @@ mongoose
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
+app.use("/api", listingsRoutes); // public — no auth required
 app.use("/api", userRoutes);
 app.use("/api", propertyRoutes);
 app.use("/api", estatRoutes);

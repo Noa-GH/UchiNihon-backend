@@ -2,7 +2,7 @@
 // If using Node < 18, uncomment the line below and install node-fetch
 // import fetch from "node-fetch";
 
-const ESTAT_BASE_URL = "https://api.e-stat.go.jp/api/1.1/json";
+// const ESTAT_BASE_URL = "https://api.e-stat.go.jp/api/1.1/json";
 
 /**
  * e-Stat API Client for housing data retrieval
