@@ -1,175 +1,83 @@
-````markdown
-# Akiya Finder — Backend API
+# UchiNihon - Backend API
 
-A standalone REST API for the Akiya Finder Japan platform.
-Built with Node.js, Express, MongoDB, and JWT authentication.
+A robust RESTful API backend for the **UchiNihon** platform, an application dedicated to finding abandoned Japanese homes (known as *Akiya*) across Japan.
 
-Any frontend (web, mobile, or third-party) can consume this API.
+This backend provides comprehensive authentication, user management, property saving features, and integrates with the official Japanese **e-Stat API** to fetch real housing statistics data.
 
 ---
 
-## Setup
+## 📖 Consumer Usage & Features
 
-```bash
-git clone <repo-url>
-cd akiya-finder-backend
-npm install
-cp .env.example .env
-# Fill in your values in .env
-npm run dev
-```
+The API acts as the core data provider for any UchiNihon frontend (web, mobile, or third-party). 
 
----
+### Key Capabilities
+- **Authentication:** Secure user registration and login using JWT (JSON Web Tokens).
+- **Property Management:** Endpoints to view properties, and allow users to save their favorite listings.
+- **e-Stat Integration:** Directly interfaces with the Japanese government's e-Stat statistics API to fetch real, authoritative housing data. This allows the platform to automatically synchronize and populate property listings with accurate statistics.
 
-## Environment Variables
+### Public Endpoints Overview
+*All routes are prefixed with `/api`.*
 
-| Variable      | Required | Description                                                          |
-| ------------- | -------- | -------------------------------------------------------------------- |
-| `PORT`        | Yes      | Port to run the server on (default: 3001)                            |
-| `MONGO_URI`   | Yes      | MongoDB connection string                                            |
-| `JWT_SECRET`  | Yes      | Secret key for signing JWTs — use a long random string in production |
-| `CORS_ORIGIN` | Yes      | URL of the consuming frontend e.g. `https://akiyafinder.com`         |
+- `POST /api/signup` - Register a new user
+- `POST /api/signin` - Authenticate and receive a JWT
+- `GET /api/properties/...` - Retrieve property listings
+- `POST /api/estat/sync` - Sync housing data from e-Stat (Requires e-Stat credentials)
+
+For full e-Stat integration details, please refer to the `ESTAT_INTEGRATION.md` and `ESTAT_SETUP.md` files in this repository.
 
 ---
 
-## Base URL
+## 💻 For Outsider Developers
 
-Development: `http://localhost:3001`
+Welcome! If you are looking to contribute, fork, or run your own instance of the UchiNihon backend, here is everything you need to know.
 
-All routes are prefixed with `/api`.
+### Tech Stack
+- **Runtime:** [Node.js](https://nodejs.org/) (v18+ recommended)
+- **Framework:** [Express.js](https://expressjs.com/)
+- **Database:** [MongoDB](https://www.mongodb.com/) via Mongoose
+- **Authentication:** JWT & bcryptjs
+- **Data Fetching:** node-fetch (for external e-Stat API calls)
 
----
+### Architecture
+The project follows an MVC-like pattern adapted for an API:
+- `controllers/` - Core business logic for handling requests.
+- `models/` - Mongoose schemas (Users, Properties, EstatCredentials).
+- `routes/` - Express route definitions mapping endpoints to controllers.
+- `middlewares/` - Custom middleware (e.g., JWT auth verification).
+- `utils/` - Helpers, error definitions, and the custom `estatClient.js`.
 
-## Authentication
+### Local Setup
 
-Protected routes require a Bearer token in the `Authorization` header:
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Noa-GH/UchiNihon-backend.git
+   cd UchiNihon-backend
+   ```
 
-```
-Authorization: Bearer <token>
-```
+2. **Install Dependencies:**
+   ```bash
+   npm install
+   ```
 
-Tokens are obtained from `POST /api/signin` and expire after 7 days.
+3. **Environment Configuration:**
+   Copy the example environment file and fill in your details:
+   ```bash
+   cp .env.example .env
+   ```
+   *Required Variables:*
+   - `PORT`: Server port (default 3001)
+   - `MONGO_URI`: Your MongoDB connection string
+   - `JWT_SECRET`: Secure string for signing tokens
+   - `CORS_ORIGIN`: Your frontend URL (e.g., `http://localhost:5173`)
 
----
+4. **Run the Development Server:**
+   ```bash
+   npm run dev
+   ```
+   The server will start at `http://localhost:3001` (or your configured port).
 
-## Endpoints
+### e-Stat Setup
+To fully utilize the housing data sync, you will need to register for an application ID at [e-Stat](https://www.e-stat.go.jp/). Once obtained, you can authenticate via the `/api/estat/auth` endpoint. See `ESTAT_SETUP.md` for a comprehensive guide.
 
-### Auth
-
-#### `POST /api/signup`
-
-Register a new user.
-
-**Body:**
-
-```json
-{ "name": "string", "email": "string", "password": "string" }
-```
-
-**Response `201`:**
-
-```json
-{ "_id": "string", "name": "string", "email": "string" }
-```
-
----
-
-#### `POST /api/signin`
-
-Login and receive a JWT.
-
-**Body:**
-
-```json
-{ "email": "string", "password": "string" }
-```
-
-**Response `200`:**
-
-```json
-{ "token": "string" }
-```
-
----
-
-#### `GET /api/users/me` 🔒
-
-Get the currently authenticated user's profile.
-
-**Response `200`:**
-
-```json
-{ "_id": "string", "name": "string", "email": "string" }
-```
-
----
-
-### Saved Properties
-
-All property routes require authentication (`Authorization: Bearer <token>`).
-
-#### `GET /api/properties/saved` 🔒
-
-Get all properties saved by the current user.
-
-**Response `200`:** Array of saved property objects.
-
----
-
-#### `POST /api/properties/saved` 🔒
-
-Save a property listing.
-
-**Body:**
-
-```json
-{
-  "listingId": "string",
-  "title": "string",
-  "prefecture": "string",
-  "city": "string",
-  "price": 0,
-  "imageUrl": "string",
-  "bedrooms": 3,
-  "sqMeters": 90,
-  "yearBuilt": 1978,
-  "description": "string",
-  "tags": ["string"]
-}
-```
-
-**Response `201`:** The saved property object including `_id`, `owner`, `createdAt`, `updatedAt`.
-
----
-
-#### `DELETE /api/properties/saved/:id` 🔒
-
-Remove a saved property by its MongoDB `_id`.
-
-**Response `200`:**
-
-```json
-{ "message": "Property removed" }
-```
-
----
-
-## Error Format
-
-All errors follow this shape:
-
-```json
-{ "error": "Human-readable error message" }
-```
-
-| Status | Meaning                                                |
-| ------ | ------------------------------------------------------ |
-| 400    | Bad request / validation error                         |
-| 401    | Missing or invalid token                               |
-| 403    | Authenticated but not authorised                       |
-| 404    | Resource not found                                     |
-| 409    | Conflict (duplicate email or duplicate saved property) |
-| 500    | Internal server error                                  |
-````
-
----
+### License
+GPL-3.0-only

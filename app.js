@@ -17,7 +17,17 @@ const app = express();
 // dev (localhost:3002) and production (https://custom-domain.com).
 app.use(
   cors({
-    origin: CORS_ORIGIN, //If multiple addresses are needed, split by ',' for each address domain
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl)
+      if (!origin) return callback(null, true);
+
+      // Check if the origin is in the CORS_ORIGIN array
+      if (CORS_ORIGIN.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   }),
 );
