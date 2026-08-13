@@ -1,6 +1,6 @@
-const jwt = require("jsonwebtoken");
-const { JWT_SECRET } = require("../utils/config");
-const { UnauthorizedError } = require("../utils/errors");
+import jwt from "jsonwebtoken";
+import { JWT_SECRET } from "../utils/config.js";
+import { UnauthorizedError } from "../utils/errors.js";
 
 // This middleware runs before any protected route handler.
 // It reads the Authorization header, verifies the JWT, and attaches
@@ -27,4 +27,4 @@ const auth = (req, res, next) => {
   }
 };
 
-module.exports = auth;
+export default auth;
