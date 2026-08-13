@@ -1,66 +1,42 @@
-import EstatCredential from "../models/estatCredential.model.js";
+import EstatSyncState from "../models/estatSyncState.model.js";
 import Property from "../models/property.model.js";
 import { EstatClient } from "../utils/estatClient.js";
-import {
-  UnauthorizedError,
-  BadRequestError,
-  NotFoundError,
-} from "../utils/errors.js";
+import { ESTAT_APP_ID, ESTAT_STATS_DATA_ID } from "../utils/config.js";
+import { BadRequestError, ServiceUnavailableError } from "../utils/errors.js";
+
+const getSyncState = () =>
+  EstatSyncState.findOneAndUpdate(
+    { key: "default" },
+    { $setOnInsert: { key: "default" } },
+    { upsert: true, new: true },
+  );
+
+const requireAppId = (next) => {
+  if (!ESTAT_APP_ID) {
+    next(
+      new ServiceUnavailableError(
+        "ESTAT_APP_ID is not configured on the server. Register a free appId at https://www.e-stat.go.jp/ and set it in .env.",
+      ),
+    );
+    return false;
+  }
+  return true;
+};
 
 /**
- * POST /api/estat/auth
- * Authenticate and store e-Stat API credentials
+ * GET /api/estat/status
+ * Whether the server is configured for e-Stat, plus last sync info.
  */
-export const authenticateEstat = async (req, res, next) => {
+export const getEstatStatus = async (req, res, next) => {
   try {
-    const { appId, apiKey } = req.body;
-
-    if (!appId || !apiKey) {
-      return next(new BadRequestError("appId and apiKey are required"));
-    }
-
-    // Verify credentials with e-Stat
-    const client = new EstatClient(appId, apiKey);
-    const verification = await client.verifyCredentials();
-
-    if (!verification.valid) {
-      return next(
-        new UnauthorizedError(
-          `Invalid e-Stat credentials: ${verification.error}`,
-        ),
-      );
-    }
-
-    // Check if user already has credentials
-    let credential = await EstatCredential.findOne({
-      userId: req.user._id,
-    });
-
-    if (credential) {
-      // Update existing credentials
-      credential.appId = appId;
-      credential.apiKey = apiKey;
-      credential.isActive = true;
-      credential.lastError = null;
-      await credential.save();
-    } else {
-      // Create new credential document
-      credential = await EstatCredential.create({
-        userId: req.user._id,
-        appId,
-        apiKey,
-        isActive: true,
-      });
-    }
-
-    res.status(201).json({
-      message: "e-Stat credentials authenticated successfully",
-      credential: {
-        id: credential._id,
-        isActive: credential.isActive,
-        createdAt: credential.createdAt,
-        updatedAt: credential.updatedAt,
-      },
+    const state = await getSyncState();
+    res.json({
+      configured: Boolean(ESTAT_APP_ID),
+      lastSyncedAt: state.lastSyncedAt,
+      syncStatus: state.syncStatus,
+      lastError: state.lastError,
+      lastStatsDataId: state.lastStatsDataId,
+      lastCount: state.lastCount,
     });
   } catch (err) {
     return next(err);
@@ -68,27 +44,25 @@ export const authenticateEstat = async (req, res, next) => {
 };
 
 /**
- * GET /api/estat/status
- * Get current e-Stat authentication status and sync info
+ * GET /api/estat/datasets?keyword=空き家&limit=20
+ * Search e-Stat's table catalog to discover a statsDataId to sync.
  */
-export const getEstatStatus = async (req, res, next) => {
+export const searchEstatDatasets = async (req, res, next) => {
   try {
-    const credential = await EstatCredential.findOne({
-      userId: req.user._id,
-    }).select("-apiKey");
+    if (!requireAppId(next)) return;
 
-    if (!credential) {
-      return next(
-        new NotFoundError("No e-Stat credentials found for this user"),
-      );
+    const { keyword, limit } = req.query;
+    if (!keyword) {
+      return next(new BadRequestError("keyword query parameter is required"));
     }
 
-    res.json({
-      isAuthenticated: credential.isActive,
-      lastSyncedAt: credential.lastSyncedAt,
-      syncStatus: credential.syncStatus,
-      lastError: credential.lastError,
+    const client = new EstatClient(ESTAT_APP_ID);
+    const datasets = await client.searchDatasets({
+      keyword,
+      limit: limit ? Number(limit) : 20,
     });
+
+    res.json({ count: datasets.length, datasets });
   } catch (err) {
     return next(err);
   }
@@ -96,179 +70,71 @@ export const getEstatStatus = async (req, res, next) => {
 
 /**
  * POST /api/estat/sync
- * Fetch housing data from e-Stat and save as properties
+ * Fetch a statistics table from e-Stat, transform it into area-level
+ * listing cards, and upsert them into the public Property collection
+ * (owner: null) that GET /api/listings serves to the frontend.
  */
 export const syncEstatData = async (req, res, next) => {
   try {
-    const { prefecture, limit = 50, offset = 0 } = req.body;
+    if (!requireAppId(next)) return;
 
-    // Get user's e-Stat credentials
-    const credential = await EstatCredential.findOne({
-      userId: req.user._id,
-    });
+    const {
+      statsDataId = ESTAT_STATS_DATA_ID,
+      limit = 100,
+      startPosition = 1,
+    } = req.body;
 
-    if (!credential || !credential.isActive) {
+    if (!statsDataId) {
       return next(
-        new UnauthorizedError(
-          "e-Stat credentials not found or inactive. Please authenticate first.",
+        new BadRequestError(
+          "statsDataId is required (pass it in the body, or set ESTAT_STATS_DATA_ID). " +
+            "Use GET /api/estat/datasets?keyword=... to find one.",
         ),
       );
     }
 
-    // Update sync status to "syncing"
-    credential.syncStatus = "syncing";
-    await credential.save();
+    const state = await getSyncState();
+    state.syncStatus = "syncing";
+    await state.save();
 
     try {
-      // Fetch data from e-Stat
-      const client = new EstatClient(credential.appId, credential.apiKey);
-      const estatData = await client.fetchHousingData({
-        prefecture,
-        limit,
-        offset,
-      });
+      const client = new EstatClient(ESTAT_APP_ID);
+      const raw = await client.fetchStatsData({ statsDataId, limit, startPosition });
+      const listings = EstatClient.transformToAreaListings(raw, { statsDataId });
 
-      if (!estatData || estatData.length === 0) {
-        credential.syncStatus = "completed";
-        credential.lastSyncedAt = new Date();
-        credential.lastError = null;
-        await credential.save();
-
-        return res.json({
-          message: "No housing data found for the specified criteria",
-          propertiesAdded: 0,
-          propertiesUpdated: 0,
-        });
-      }
-
-      // Save properties to database
       let added = 0;
       let updated = 0;
 
-      for (const propertyData of estatData) {
-        const existing = await Property.findOne({
-          listingId: propertyData.listingId,
-        });
-
-        if (existing) {
-          // Update existing property
-          Object.assign(existing, propertyData);
-          await existing.save();
-          updated++;
-        } else {
-          // Create new property
-          await Property.create({
-            ...propertyData,
-            owner: req.user._id,
-          });
-          added++;
-        }
+      for (const listingData of listings) {
+        const result = await Property.findOneAndUpdate(
+          { listingId: listingData.listingId, owner: null },
+          { $set: listingData },
+          { upsert: true, new: false },
+        );
+        if (result) updated++;
+        else added++;
       }
 
-      // Update sync status
-      credential.syncStatus = "completed";
-      credential.lastSyncedAt = new Date();
-      credential.lastError = null;
-      await credential.save();
+      state.syncStatus = "completed";
+      state.lastSyncedAt = new Date();
+      state.lastError = null;
+      state.lastStatsDataId = statsDataId;
+      state.lastCount = listings.length;
+      await state.save();
 
       res.json({
         message: "e-Stat data synced successfully",
+        statsDataId,
         propertiesAdded: added,
         propertiesUpdated: updated,
-        totalProcessed: estatData.length,
+        totalProcessed: listings.length,
       });
     } catch (syncError) {
-      // Update sync status on failure
-      credential.syncStatus = "failed";
-      credential.lastError = syncError.message;
-      await credential.save();
-
+      state.syncStatus = "failed";
+      state.lastError = syncError.message;
+      await state.save();
       return next(syncError);
     }
-  } catch (err) {
-    return next(err);
-  }
-};
-
-/**
- * GET /api/estat/datasets
- * List available housing datasets from e-Stat
- */
-export const getAvailableDatasets = async (req, res, next) => {
-  try {
-    const credential = await EstatCredential.findOne({
-      userId: req.user._id,
-    });
-
-    if (!credential || !credential.isActive) {
-      return next(
-        new UnauthorizedError(
-          "e-Stat credentials not found or inactive. Please authenticate first.",
-        ),
-      );
-    }
-
-    const client = new EstatClient(credential.appId, credential.apiKey);
-    const datasets = await client.fetchDatasets("housing");
-
-    res.json({
-      datasets: datasets,
-    });
-  } catch (err) {
-    return next(err);
-  }
-};
-
-/**
- * DELETE /api/estat/credentials
- * Remove e-Stat credentials for the user
- */
-export const removeEstatCredentials = async (req, res, next) => {
-  try {
-    const credential = await EstatCredential.findOneAndDelete({
-      userId: req.user._id,
-    });
-
-    if (!credential) {
-      return next(
-        new NotFoundError("No e-Stat credentials found for this user"),
-      );
-    }
-
-    res.json({
-      message: "e-Stat credentials removed successfully",
-    });
-  } catch (err) {
-    return next(err);
-  }
-};
-
-/**
- * GET /api/estat/properties
- * Get all synced properties from e-Stat
- */
-export const getEstatProperties = async (req, res, next) => {
-  try {
-    const { prefecture, sortBy = "createdAt", order = "desc" } = req.query;
-
-    let query = {
-      owner: req.user._id,
-      listingId: /^estat-/, // Only e-Stat properties
-    };
-
-    if (prefecture) {
-      query.prefecture = prefecture;
-    }
-
-    const sortOrder = order === "asc" ? 1 : -1;
-    const properties = await Property.find(query)
-      .sort({ [sortBy]: sortOrder })
-      .lean();
-
-    res.json({
-      count: properties.length,
-      properties,
-    });
   } catch (err) {
     return next(err);
   }

@@ -36,6 +36,13 @@ class ConflictError extends Error {
   }
 }
 
+class ServiceUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.statusCode = 503;
+  }
+}
+
 // Global error handling middleware
 // This is how Express recognizes an error-handling middleware: it has four parameters (err, req, res, next)
 const handleError = (err, req, res, next) => {
@@ -51,5 +58,6 @@ export {
   ForbiddenError,
   NotFoundError,
   ConflictError,
+  ServiceUnavailableError,
   handleError,
 };

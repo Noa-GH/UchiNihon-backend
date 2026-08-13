@@ -1,231 +1,262 @@
-// Note: fetch is available globally in Node.js 18+
-// If using Node < 18, uncomment the line below and install node-fetch
-// import fetch from "node-fetch";
+import { ESTAT_BASE_URL, ESTAT_REQUEST_TIMEOUT } from "./config.js";
 
-// const ESTAT_BASE_URL = "https://api.e-stat.go.jp/api/1.1/json";
+// A typical Japanese home (for scaling per-m2 land/floor price stats into a
+// rough representative total). Purely a labeling convenience — the raw
+// statValue/statUnit are always preserved on the listing so nothing is hidden.
+const TYPICAL_HOME_SQM = 90;
+
+// e-Stat's JSON conversion collapses single-item arrays to a bare object
+// (a classic XML->JSON quirk). Every list-shaped field must be normalized
+// before iterating, or a dataset with exactly one row silently breaks.
+const toArray = (value) => {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
+};
 
 /**
- * e-Stat API Client for housing data retrieval
- * Handles authentication and data fetching from e-Stat
+ * e-Stat API client (v3.0, JSON) for Japan's government statistics API.
+ * https://www.e-stat.go.jp/api/api-info/e-stat-manual3-0
+ *
+ * e-Stat issues a single Application ID per registered app (not per
+ * end-user) and has no separate "apiKey" — appId is the only credential.
  */
 export class EstatClient {
-  constructor(appId, apiKey) {
+  constructor(appId) {
+    if (!appId) {
+      throw new Error("EstatClient requires an appId");
+    }
     this.appId = appId;
-    this.apiKey = apiKey;
+  }
+
+  async #request(endpoint, params) {
+    const url = new URL(`${ESTAT_BASE_URL}/${endpoint}`);
+    url.searchParams.set("appId", this.appId);
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== "") {
+        url.searchParams.set(key, value);
+      }
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      ESTAT_REQUEST_TIMEOUT,
+    );
+
+    try {
+      const response = await fetch(url.toString(), {
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`e-Stat API error: ${response.status} ${response.statusText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("e-Stat API request timed out");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   /**
-   * Verify credentials by testing the API connection
+   * Verify the appId is accepted by e-Stat (cheapest possible real call).
    */
   async verifyCredentials() {
     try {
-      const url = new URL(`${ESTAT_BASE_URL}/app/queryInfo`);
-      url.searchParams.append("appId", this.appId);
-      url.searchParams.append("apiKey", this.apiKey);
-      url.searchParams.append("limit", "1");
-
-      const response = await fetch(url.toString());
-
-      if (!response.ok) {
-        throw new Error(`e-Stat API error: ${response.status}`);
+      const json = await this.#request("getStatsList", { limit: 1 });
+      const result = json?.GET_STATS_LIST?.RESULT;
+      if (!result || result.STATUS !== 0) {
+        return { valid: false, error: result?.ERROR_MSG || "Unknown e-Stat error" };
       }
-
-      const data = await response.json();
-      return data.result.error !== null
-        ? { valid: false, error: data.result.error }
-        : { valid: true };
+      return { valid: true };
     } catch (error) {
       return { valid: false, error: error.message };
     }
   }
 
   /**
-   * Fetch housing data from e-Stat database
-   * @param {Object} params - Query parameters
-   * @param {String} params.statsDataId - e-Stat database ID for housing data
-   * @param {String} params.prefecture - Prefecture code or name
-   * @param {String} params.limit - Number of results to return
+   * Search the e-Stat table catalog to discover a statsDataId.
+   * e.g. searchDatasets({ keyword: "空き家" })
    */
-  async fetchHousingData(params = {}) {
-    try {
-      const {
-        statsDataId = "0003411",
-        prefecture = null,
-        limit = 100,
-        offset = 0,
-      } = params;
+  async searchDatasets({ keyword, limit = 20 } = {}) {
+    const json = await this.#request("getStatsList", {
+      searchWord: keyword,
+      limit,
+    });
 
-      const url = new URL(`${ESTAT_BASE_URL}/data`);
-      url.searchParams.append("appId", this.appId);
-      url.searchParams.append("apiKey", this.apiKey);
-      url.searchParams.append("statsDataId", statsDataId);
-      url.searchParams.append("cdTab", "Y");
-      url.searchParams.append("limit", limit);
-      url.searchParams.append("startPosition", offset);
-
-      if (prefecture) {
-        url.searchParams.append("lvTab", prefecture);
-      }
-
-      // Use AbortController for timeout support in fetch
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-      try {
-        const response = await fetch(url.toString(), {
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(
-            `e-Stat API error: ${response.status} ${response.statusText}`,
-          );
-        }
-
-        const data = await response.json();
-
-        if (data.result.error) {
-          throw new Error(`e-Stat error: ${JSON.stringify(data.result.error)}`);
-        }
-
-        return this.transformEstatData(data);
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    } catch (error) {
-      if (error.name === "AbortError") {
-        throw new Error("e-Stat API request timeout");
-      }
-      throw new Error(`Failed to fetch housing data: ${error.message}`);
+    const result = json?.GET_STATS_LIST?.RESULT;
+    if (!result || result.STATUS !== 0) {
+      throw new Error(`e-Stat error: ${result?.ERROR_MSG || "Unknown error"}`);
     }
+
+    const tables = toArray(json.GET_STATS_LIST.DATALIST_INF?.TABLE_INF);
+
+    return tables.map((t) => ({
+      statsDataId: t["@id"],
+      statName: t.STAT_NAME?.$ || "",
+      title: typeof t.TITLE === "string" ? t.TITLE : t.TITLE?.$ || "",
+      govOrg: t.GOV_ORG?.$ || "",
+      mainCategory: t.MAIN_CATEGORY?.$ || "",
+      subCategory: t.SUB_CATEGORY?.$ || "",
+      surveyDate: t.SURVEY_DATE || "",
+      updatedDate: t.UPDATED_DATE || "",
+    }));
   }
 
   /**
-   * Fetch all available datasets from e-Stat
+   * Fetch raw statistical data for a table (statsDataId) plus its
+   * classification metadata (area/category/time code -> name lookups).
    */
-  async fetchDatasets(searchKeyword = "housing") {
-    try {
-      const url = new URL(`${ESTAT_BASE_URL}/app/getStatsList`);
-      url.searchParams.append("appId", this.appId);
-      url.searchParams.append("apiKey", this.apiKey);
-      url.searchParams.append("searchWord", searchKeyword);
-      url.searchParams.append("limit", "100");
-
-      const response = await fetch(url.toString());
-
-      if (!response.ok) {
-        throw new Error(`e-Stat API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (data.result.error) {
-        throw new Error(`e-Stat error: ${JSON.stringify(data.result.error)}`);
-      }
-
-      return data.result;
-    } catch (error) {
-      throw new Error(`Failed to fetch datasets: ${error.message}`);
+  async fetchStatsData({ statsDataId, limit = 100, startPosition = 1 }) {
+    if (!statsDataId) {
+      throw new Error("statsDataId is required to fetch e-Stat data");
     }
+
+    const json = await this.#request("getStatsData", {
+      statsDataId,
+      limit,
+      startPosition,
+      metaGetFlg: "Y",
+      cntGetFlg: "N",
+    });
+
+    const result = json?.GET_STATS_DATA?.RESULT;
+    if (!result || result.STATUS !== 0) {
+      throw new Error(`e-Stat error: ${result?.ERROR_MSG || "Unknown error"}`);
+    }
+
+    const statData = json.GET_STATS_DATA.STATISTICAL_DATA;
+    const classAxes = toArray(statData?.CLASS_INF?.CLASS_OBJ);
+    const values = toArray(statData?.DATA_INF?.VALUE);
+
+    return { classAxes, values };
   }
 
   /**
-   * Transform e-Stat API response to housing property format
+   * Build { axisId: { name, codes: { code: { name, level, parentCode } } } }
+   * from CLASS_INF.CLASS_OBJ so raw codes on each data row can be resolved
+   * to human-readable Japanese names.
    */
-  transformEstatData(estatResponse) {
-    try {
-      if (!estatResponse.result || !estatResponse.result.data) {
-        return [];
+  static buildClassLookup(classAxes) {
+    const lookup = {};
+    for (const axis of classAxes) {
+      const codes = {};
+      for (const cls of toArray(axis.CLASS)) {
+        codes[cls["@code"]] = {
+          name: cls["@name"],
+          level: cls["@level"],
+          parentCode: cls["@parentCode"],
+        };
       }
-
-      const { table, data } = estatResponse.result;
-
-      // Transform raw e-Stat data into property listings
-      return data
-        .map((item) => {
-          return {
-            listingId: `estat-${item[0]}`,
-            title: this.extractTitle(item, table),
-            prefecture: item.find((val, idx) => table.tab[idx]?.name === "area")
-              ? item[table.tab.findIndex((t) => t.name === "area")]
-              : "Unknown",
-            city: this.extractCity(item, table),
-            price: this.extractPrice(item, table),
-            bedrooms: this.extractBedrooms(item, table),
-            sqMeters: this.extractSquareMeters(item, table),
-            yearBuilt: this.extractYearBuilt(item, table),
-            description: this.extractDescription(item, table),
-            imageUrl: "",
-            tags: ["e-Stat", "Government Data"],
-          };
-        })
-        .filter((property) => property.price > 0); // Only return valid listings
-    } catch (error) {
-      console.error("Error transforming e-Stat data:", error);
-      return [];
+      lookup[axis["@id"]] = { name: axis["@name"], codes };
     }
+    return lookup;
   }
 
-  extractTitle(item, table) {
-    const titleIndex = table.tab.findIndex(
-      (t) => t.name === "title" || t.name === "区分",
-    );
-    return titleIndex >= 0 ? item[titleIndex] : "Housing Data";
+  static resolveArea(areaCode, areaAxis) {
+    const entry = areaAxis?.codes?.[areaCode];
+    if (!entry) {
+      return { prefecture: areaCode || "Unknown", city: "" };
+    }
+    // Prefecture-level rows have no parentCode (or level "1"); municipality
+    // rows carry a parentCode pointing back at their prefecture's code.
+    if (!entry.parentCode) {
+      return { prefecture: entry.name, city: "" };
+    }
+    const parent = areaAxis.codes[entry.parentCode];
+    return { prefecture: parent?.name || entry.name, city: entry.name };
   }
 
-  extractCity(item, table) {
-    const cityIndex = table.tab.findIndex(
-      (t) => t.name === "city" || t.name === "市区町村",
-    );
-    return cityIndex >= 0 ? item[cityIndex] : "Unknown";
+  static estimatePrice(statValue, unit) {
+    if (!unit || !Number.isFinite(statValue)) return 0;
+    if (unit.includes("円/m2") || unit.includes("円/㎡")) {
+      return Math.round(statValue * TYPICAL_HOME_SQM);
+    }
+    if (unit.includes("千円")) return Math.round(statValue * 1000);
+    if (unit === "円" || unit.includes("円")) return Math.round(statValue);
+    return 0;
   }
 
-  extractPrice(item, table) {
-    const priceIndex = table.tab.findIndex(
-      (t) =>
-        t.name === "price" ||
-        t.name === "価格" ||
-        t.name === "平均価格" ||
-        t.name?.includes("価"),
-    );
-    const price = priceIndex >= 0 ? parseFloat(item[priceIndex]) : 0;
-    return isNaN(price) ? 0 : price;
-  }
+  /**
+   * Transform raw e-Stat statistical rows into area-level "listing" cards.
+   *
+   * IMPORTANT: e-Stat publishes aggregate statistics per area (vacant-home
+   * counts, average land price, housing starts) — never individual homes
+   * with a street address or photo. Each card here represents one area's
+   * statistic for the most recent survey period in the fetched data, and
+   * is explicitly flagged `isStatisticalEstimate: true` so the frontend can
+   * label it as such rather than presenting it as a specific property.
+   */
+  static transformToAreaListings({ classAxes, values }, { statsDataId }) {
+    if (!values.length) return [];
 
-  extractBedrooms(item, table) {
-    const bedroomIndex = table.tab.findIndex(
-      (t) =>
-        t.name === "bedrooms" || t.name === "部屋数" || t.name?.includes("室"),
-    );
-    const bedrooms = bedroomIndex >= 0 ? parseInt(item[bedroomIndex]) : null;
-    return isNaN(bedrooms) ? null : bedrooms;
-  }
+    const lookup = EstatClient.buildClassLookup(classAxes);
+    const areaAxis = lookup.area;
+    const timeAxis = lookup.time;
+    const catAxis = lookup.cat01;
+    const tabAxis = lookup.tab;
 
-  extractSquareMeters(item, table) {
-    const sqIndex = table.tab.findIndex(
-      (t) =>
-        t.name === "sqMeters" || t.name === "面積" || t.name?.includes("㎡"),
+    // Restrict to the most recent survey period present in this batch so we
+    // don't emit a dozen near-duplicate cards per area across decades of
+    // survey history. e-Stat time codes are zero-padded and sort correctly
+    // as strings (larger code = later period).
+    const latestTime = values.reduce(
+      (max, v) => (v["@time"] > max ? v["@time"] : max),
+      values[0]["@time"],
     );
-    const sqMeters = sqIndex >= 0 ? parseFloat(item[sqIndex]) : null;
-    return isNaN(sqMeters) ? null : sqMeters;
-  }
 
-  extractYearBuilt(item, table) {
-    const yearIndex = table.tab.findIndex(
-      (t) => t.name === "year" || t.name === "築年数" || t.name?.includes("年"),
-    );
-    const year = yearIndex >= 0 ? parseInt(item[yearIndex]) : null;
-    return isNaN(year) ? null : year;
-  }
+    return values
+      .filter((v) => v["@time"] === latestTime)
+      .map((v) => {
+        const { prefecture, city } = EstatClient.resolveArea(v["@area"], areaAxis);
+        const timeName = timeAxis?.codes?.[v["@time"]]?.name || v["@time"];
+        const categoryLabel =
+          catAxis?.codes?.[v["@cat01"]]?.name ||
+          tabAxis?.codes?.[v["@tab"]]?.name ||
+          "Statistic";
+        const unit = v["@unit"] || "";
+        const statValue = parseFloat(v["$"]);
 
-  extractDescription(item, table) {
-    const descIndex = table.tab.findIndex(
-      (t) =>
-        t.name === "description" ||
-        t.name === "説明" ||
-        t.name?.includes("備考"),
-    );
-    return descIndex >= 0 ? item[descIndex] : "";
+        const listingId = [
+          "estat",
+          statsDataId,
+          v["@tab"],
+          v["@cat01"],
+          v["@area"],
+          v["@time"],
+        ]
+          .filter(Boolean)
+          .join("-");
+
+        return {
+          listingId,
+          title: `${prefecture}${city ? " ・ " + city : ""} — ${categoryLabel} (${timeName})`,
+          prefecture,
+          city,
+          price: EstatClient.estimatePrice(statValue, unit),
+          imageUrl: "",
+          bedrooms: null,
+          sqMeters: null,
+          yearBuilt: null,
+          description:
+            `Statistical estimate for ${prefecture}${city ? " / " + city : ""}, ` +
+            `based on e-Stat dataset ${statsDataId} (${timeName}): ` +
+            `${categoryLabel} = ${Number.isFinite(statValue) ? statValue.toLocaleString() : v["$"]}${unit}. ` +
+            `This reflects an aggregate government statistic for the area, not an individual property.`,
+          tags: ["e-Stat", "Statistical Estimate", categoryLabel].filter(Boolean),
+          isStatisticalEstimate: true,
+          sourceDatasetId: statsDataId,
+          statValue: Number.isFinite(statValue) ? statValue : null,
+          statUnit: unit,
+          statLabel: categoryLabel,
+        };
+      })
+      .filter((listing) => listing.prefecture && listing.prefecture !== "Unknown");
   }
 }
 

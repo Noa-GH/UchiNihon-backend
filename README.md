@@ -15,17 +15,18 @@ The API acts as the core data provider for any UchiNihon frontend (web, mobile, 
 ### Key Capabilities
 - **Authentication:** Secure user registration and login using JWT (JSON Web Tokens).
 - **Property Management:** Endpoints to view properties, and allow users to save their favorite listings.
-- **e-Stat Integration:** Directly interfaces with the Japanese government's e-Stat statistics API to fetch real, authoritative housing data. This allows the platform to automatically synchronize and populate property listings with accurate statistics.
+- **e-Stat Integration:** Interfaces with the Japanese government's e-Stat statistics API (vacant-home counts, land prices) to populate the public listings feed with area-level statistical estimate cards, clearly labeled as such (e-Stat is a statistics API, not a per-home listings source — see `ESTAT_INTEGRATION.md`).
 
 ### Public Endpoints Overview
 *All routes are prefixed with `/api`.*
 
 - `POST /api/signup` - Register a new user
 - `POST /api/signin` - Authenticate and receive a JWT
-- `GET /api/properties/...` - Retrieve property listings
-- `POST /api/estat/sync` - Sync housing data from e-Stat (Requires e-Stat credentials)
+- `GET /api/listings` - Public, unauthenticated: all listings shown to visitors
+- `GET /api/properties/saved` - A logged-in user's saved properties
+- `GET /api/estat/status`, `GET /api/estat/datasets`, `POST /api/estat/sync` - Server-side e-Stat sync (requires login; uses the server's own `ESTAT_APP_ID`, not per-user credentials)
 
-For full e-Stat integration details, please refer to the `ESTAT_INTEGRATION.md` and `ESTAT_SETUP.md` files in this repository.
+For full e-Stat integration details, findings, and how the data model works, see `ESTAT_INTEGRATION.md`.
 
 ---
 
@@ -38,12 +39,12 @@ Welcome! If you are looking to contribute, fork, or run your own instance of the
 - **Framework:** [Express.js](https://expressjs.com/)
 - **Database:** [MongoDB](https://www.mongodb.com/) via Mongoose
 - **Authentication:** JWT & bcryptjs
-- **Data Fetching:** node-fetch (for external e-Stat API calls)
+- **Data Fetching:** Native `fetch` (Node.js 18+) for e-Stat API calls
 
 ### Architecture
 The project follows an MVC-like pattern adapted for an API:
 - `controllers/` - Core business logic for handling requests.
-- `models/` - Mongoose schemas (Users, Properties, EstatCredentials).
+- `models/` - Mongoose schemas (Users, Properties, EstatSyncState).
 - `routes/` - Express route definitions mapping endpoints to controllers.
 - `middlewares/` - Custom middleware (e.g., JWT auth verification).
 - `utils/` - Helpers, error definitions, and the custom `estatClient.js`.
@@ -79,7 +80,7 @@ The project follows an MVC-like pattern adapted for an API:
    The server will start at `http://localhost:3001` (or your configured port).
 
 ### e-Stat Setup
-To fully utilize the housing data sync, you will need to register for an application ID at [e-Stat](https://www.e-stat.go.jp/). Once obtained, you can authenticate via the `/api/estat/auth` endpoint. See `ESTAT_SETUP.md` for a comprehensive guide.
+To populate real listings data, register a free Application ID at [e-Stat](https://www.e-stat.go.jp/mypage/) and set `ESTAT_APP_ID` in `.env`. Then run `npm run estat:search -- "空き家"` to find a dataset and `npm run estat:sync -- <statsDataId>` to seed the database. See `ESTAT_INTEGRATION.md` for the full guide.
 
 ### License
 GPL-3.0-only

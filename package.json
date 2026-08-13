@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "nodemon app.js"
+    "dev": "nodemon app.js",
+    "estat:search": "node scripts/estatSearch.js",
+    "estat:sync": "node scripts/estatSync.js"
   },
   "repository": {
     "type": "git",
