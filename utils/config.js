@@ -8,10 +8,30 @@ export const MONGO_URI =
 export const JWT_SECRET =
   process.env.JWT_SECRET || "your-secret-here || optional-fallback-here";
 
-const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:3001";
+// A browser's Origin header is scheme + host + optional port — never a path,
+// never a trailing slash. So "https://noa-gh.github.io/UchiNihon-frontend/"
+// (the URL you'd naturally copy from the address bar) must be reduced to
+// "https://noa-gh.github.io" before it can ever match an incoming request.
+// Normalising both sides makes the allowlist tolerant of how it was written.
+export const normalizeOrigin = (value) => {
+  const trimmed = String(value).trim();
+  if (!trimmed) return "";
+  try {
+    // URL.origin yields exactly what the browser sends.
+    return new URL(trimmed).origin.toLowerCase();
+  } catch {
+    // Not a parseable URL — drop any path segment and normalise what's left.
+    return trimmed.replace(/\/.*$/, "").toLowerCase();
+  }
+};
+
+// Default is the Vite dev server (see vite.config.ts -> server.port), NOT the
+// backend's own port. The previous default of 3001 was the API itself, which
+// meant a missing CORS_ORIGIN blocked every browser request in dev and prod.
+const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:3000";
 export const CORS_ORIGIN = corsOrigin
   .split(",")
-  .map((origin) => origin.trim())
+  .map(normalizeOrigin)
   .filter(Boolean);
 
 // e-Stat (Japan government statistics API). appId is a single server-side
