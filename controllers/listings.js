@@ -24,7 +24,11 @@ export const getListings = async (req, res, next) => {
       order = "desc",
     } = req.query;
 
-    const query = {};
+    // owner: null is what distinguishes a public/system listing (see
+    // models/property.model.js) from a user's private saved property.
+    // Without this filter, GET /api/listings — a public, unauthenticated
+    // endpoint — returned EVERY user's saved homes to anyone.
+    const query = { owner: null };
 
     // Prefecture filter — skip if "All" or not provided
     if (prefecture && prefecture !== "All") {
